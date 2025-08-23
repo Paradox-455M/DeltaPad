@@ -19,7 +19,7 @@ export default function CodeEditor(props: {
     const editor = monaco.editor.create(containerRef.current, {
       value: tab.content,
       language: tab.language,
-      theme: 'vs-dark',
+      theme: 'synthwave-neon',
       automaticLayout: true,
       wordWrap: wordWrap ? 'on' : 'off',
       minimap: { enabled: false },

@@ -1,23 +1,25 @@
 :root {
-  --bg: #ffffff;
-  --fg: #1f2937;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --accent: #2563eb;
-  --right-panel-width: 360px;
-  --left-panel-width: 420px;
-  --titlebar-h: 44px;
-  --statusbar-h: 28px;
-}
-:root[data-theme="dark"], [data-theme="dark"] {
   --bg: #0b0f16;
   --fg: #e5e7eb;
   --muted: #94a3b8;
   --border: #1f2937;
   --accent: #60a5fa;
+  --right-panel-width: 360px;
+  --left-panel-width: 420px;
+  --titlebar-h: 44px;
+  --statusbar-h: 28px;
+
+  /* Synthwave / Neon Palette */
+  --neon-pink: #ff77e9;
+  --neon-blue: #4cc9f0;
+  --neon-green: #72f1b8;
+  --neon-red: #ff5370;
+  --neon-color: var(--neon-pink);
+  --bg-gradient: linear-gradient(135deg, #4c1d95 0%, #312e81 40%, #0b0f16 75%, #000000 100%);
 }
+
 html, body, #root { height: 100%; margin: 0; }
-body { background: var(--bg); color: var(--fg); font: 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial; }
+body { background: var(--bg-gradient); color: var(--fg); font: 13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Ubuntu,"Helvetica Neue",Arial; }
 
 .app {display:flex ;flex-direction: column; height: 100%; }
 .titlebar { height: 44px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 0 8px; border-bottom: 1px solid var(--border); background: #0f172a; color: #cbd5e1; }
@@ -57,12 +59,102 @@ body { background: var(--bg); color: var(--fg); font: 13px/1.4 -apple-system,Bli
 .panel.findreplace .hint { color: var(--muted); margin-top: 8px; }
 
 .diff-view { display: flex; flex-direction: column; flex: 1; }
-.diff-toolbar { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: 12px; padding: 8px; border-bottom: 1px solid var(--border); }
+.diff-toolbar { display: grid; grid-template-columns: 1fr 1fr auto; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid transparent; }
 .diff-toolbar .lane { display: flex; align-items: center; gap: 6px; }
 .diff-toolbar .spacer { display: none; }
 .diff-toolbar .close { margin-left: auto; border: none; background: transparent; font-size: 16px; color: var(--muted); cursor: pointer; padding: 2px 6px; }
 .diff-toolbar .close:hover { color: var(--fg); }
-.diff-editor { position: relative; flex: 1; height: calc(100vh - 100px); }
+.diff-editor { flex: 1; display: flex; padding: 1rem; }
+
+/* Base neon background */
+.neon-bg {
+  background: linear-gradient(135deg, #1a1a2e, #2b213a, #0f2027);
+  min-height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Toolbar */
+.neon-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 1rem;
+  background: linear-gradient(90deg, #6a00f4, #ff007f, #00eaff);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  font-family: monospace;
+  color: #fff;
+  justify-content: space-between;
+}
+
+/* Toolbar labels */
+.neon-text {
+  color: #ff77e9;
+  text-shadow: 0 0 6px rgba(255, 119, 233, 0.9);
+}
+
+/* Select dropdown */
+.neon-select {
+  background: rgba(20, 20, 30, 0.8);
+  color: #72f1b8;
+  border: 1px solid #ff77e9;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-family: monospace;
+}
+
+/* Button */
+.neon-button {
+  background: transparent;
+  color: #ff77e9;
+  font-size: 1.5rem;
+  border: 2px solid #ff77e9;
+  border-radius: 50%;
+  width: 2rem;
+  height: 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-shadow: 0 0 10px #ff77e9;
+  box-shadow: 0 0 10px #ff77e9;
+  transition: all 0.2s ease-in-out;
+}
+.neon-button:hover {
+  background: #ff77e9;
+  color: black;
+  box-shadow: 0 0 20px #ff77e9;
+}
+
+/* Editor container */
+.editor-glass {
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1rem;
+  box-shadow: 0 0 12px rgba(255, 119, 233, 0.2);
+  height: 100%;
+}
+/* Scope host sizing to DiffView only to avoid impacting main editor */
+.diff-view .editor-host {
+  position: relative;
+  inset: auto;
+  width: 100%;
+  height: 100%;
+  min-height: 400px; /* prevents 0-height issue */
+}
+
+/* Editor grid */
+.diff-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; width: 100%; height: 100%; }
+@media (max-width: 900px) {
+  .diff-grid { grid-template-columns: 1fr; }
+}
+
+/* Diff highlights */
+.neon-addition-line { background: rgba(114, 241, 184, 0.2) !important; }
+.neon-addition-gutter { border-left: 3px solid #72f1b8 !important; }
+
+.neon-deletion-line { background: rgba(255, 83, 112, 0.2) !important; }
+.neon-deletion-gutter { border-left: 3px solid #ff5370 !important; }
 
 /* Monaco editor layout fixes */
 .monaco-editor,
@@ -85,7 +177,7 @@ body { background: var(--bg); color: var(--fg); font: 13px/1.4 -apple-system,Bli
 .monaco-diff-editor .editor.original,
 .monaco-diff-editor .editor.modified {
   width: 100% !important;
-  height: 100% !important;
+  /* height: 100% !important; */
 }
 
 /* Ensure split view is balanced */

@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as monaco from 'monaco-editor';
+import '../lib/monaco/setup';
+import { motion } from 'framer-motion';
 import { Tab } from './EditorTabs';
 
 export default function DiffView(props: {
@@ -9,14 +11,23 @@ export default function DiffView(props: {
   onSelect: (leftId?: string, rightId?: string) => void;
   onClose: () => void;
 }) {
-  const { tabs, leftId, rightId, onSelect, onClose } = props;
-  const ref = useRef<HTMLDivElement | null>(null);
-  const editorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
-  const [leftLang, setLeftLang] = useState<string>('plaintext');
-  const [rightLang, setRightLang] = useState<string>('plaintext');
+  const { tabs, leftId, rightId, onClose } = props;
+
+  const leftWrapRef = useRef<HTMLDivElement | null>(null);
+  const rightWrapRef = useRef<HTMLDivElement | null>(null);
+  const leftEditorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const rightEditorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const leftModelRef = useRef<monaco.editor.ITextModel | null>(null);
+  const rightModelRef = useRef<monaco.editor.ITextModel | null>(null);
+  const leftDecorationsRef = useRef<string[]>([]);
+  const rightDecorationsRef = useRef<string[]>([]);
+  const debounceTimer = useRef<number | undefined>(undefined);
 
   const left = tabs.find(t => t.id === leftId) ?? tabs[0];
   const right = tabs.find(t => t.id === rightId) ?? tabs[1];
+
+  const [leftLang, setLeftLang] = useState<string>(left?.language || 'plaintext');
+  const [rightLang, setRightLang] = useState<string>(right?.language || 'plaintext');
 
   const languages = useMemo(() => ([
     'plaintext', 'json', 'javascript', 'typescript', 'html', 'css', 'scss', 'less', 'markdown',
@@ -24,84 +35,201 @@ export default function DiffView(props: {
     'sql'
   ]), []);
 
-  useEffect(() => {
-    if (!ref.current) return;
-    
-    // Ensure container has explicit dimensions
-    if (ref.current.parentElement) {
-      ref.current.parentElement.style.width = '100%';
-      ref.current.parentElement.style.height = '100%';
+  const computeAndDecorate = async () => {
+    if (!leftModelRef.current || !rightModelRef.current || !leftEditorRef.current || !rightEditorRef.current) return;
+    try {
+      const result = await (monaco.editor as any).computeDiff(leftModelRef.current, rightModelRef.current, {
+        ignoreTrimWhitespace: false,
+        maxComputationTime: 1500
+      });
+      const changes = result?.changes ?? [];
+
+      const leftDecors: monaco.editor.IModelDeltaDecoration[] = [];
+      const rightDecors: monaco.editor.IModelDeltaDecoration[] = [];
+
+      for (const c of changes) {
+        const oStart = Math.max(1, c.original.startLineNumber);
+        const oEnd = Math.max(oStart, c.original.endLineNumber);
+        const mStart = Math.max(1, c.modified.startLineNumber);
+        const mEnd = Math.max(mStart, c.modified.endLineNumber);
+
+        if (oEnd >= oStart) {
+          leftDecors.push({
+            range: new monaco.Range(oStart, 1, oEnd, 1),
+            options: {
+              isWholeLine: true,
+              className: 'neon-deletion-line',
+              linesDecorationsClassName: 'neon-deletion-gutter'
+            }
+          });
+        }
+        if (mEnd >= mStart) {
+          rightDecors.push({
+            range: new monaco.Range(mStart, 1, mEnd, 1),
+            options: {
+              isWholeLine: true,
+              className: 'neon-addition-line',
+              linesDecorationsClassName: 'neon-addition-gutter'
+            }
+          });
+        }
+      }
+
+      leftDecorationsRef.current = leftEditorRef.current.deltaDecorations(leftDecorationsRef.current, leftDecors);
+      rightDecorationsRef.current = rightEditorRef.current.deltaDecorations(rightDecorationsRef.current, rightDecors);
+    } catch {
+      // no-op
     }
-    ref.current.style.width = '100%';
-    ref.current.style.height = '100%';
-    
-    monaco.editor.setTheme('vs-dark');
-    const e = monaco.editor.createDiffEditor(ref.current, {
-      renderSideBySide: true,
-      automaticLayout: true,
-      readOnly: false,
-      originalEditable: true,
-      enableSplitViewResizing: true,
-      minimap: { enabled: false }
-    });
-    
-    // Force layout after creation
-    setTimeout(() => {
-      if (e) e.layout();
-    }, 50);
-    
-    editorRef.current = e;
-    return () => { e.dispose(); };
+  };
+
+  useEffect(() => {
+    const init = () => {
+      if (!leftWrapRef.current || !rightWrapRef.current) return;
+
+      monaco.editor.setTheme('synthwave-neon');
+
+      // Models
+      const leftModel = monaco.editor.createModel(left?.content ?? '', leftLang || left?.language || 'plaintext');
+      const rightModel = monaco.editor.createModel(right?.content ?? '', rightLang || right?.language || 'plaintext');
+      leftModelRef.current = leftModel;
+      rightModelRef.current = rightModel;
+
+      // Editors
+      const leftEditor = monaco.editor.create(leftWrapRef.current, {
+        model: leftModel,
+        theme: 'synthwave-neon',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        lineNumbers: 'on',
+        folding: true,
+        renderWhitespace: 'selection',
+        tabSize: 2
+      });
+      const rightEditor = monaco.editor.create(rightWrapRef.current, {
+        model: rightModel,
+        theme: 'synthwave-neon',
+        automaticLayout: true,
+        minimap: { enabled: false },
+        lineNumbers: 'on',
+        folding: true,
+        renderWhitespace: 'selection',
+        tabSize: 2
+      });
+
+      leftEditorRef.current = leftEditor;
+      rightEditorRef.current = rightEditor;
+
+      const onChange = () => {
+        if (debounceTimer.current) window.clearTimeout(debounceTimer.current);
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore - setTimeout returns number in browsers
+        debounceTimer.current = window.setTimeout(() => {
+          computeAndDecorate();
+        }, 150);
+      };
+
+      const d1 = leftEditor.onDidChangeModelContent(onChange);
+      const d2 = rightEditor.onDidChangeModelContent(onChange);
+
+      // Initial compute
+      computeAndDecorate();
+
+      return () => {
+        d1.dispose();
+        d2.dispose();
+        if (leftEditorRef.current) leftEditorRef.current.dispose();
+        if (rightEditorRef.current) rightEditorRef.current.dispose();
+        if (leftModelRef.current) leftModelRef.current.dispose();
+        if (rightModelRef.current) rightModelRef.current.dispose();
+      };
+    };
+
+    const cleanup = init();
+    return () => {
+      if (cleanup) cleanup();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (!editorRef.current) return;
-    if (!left || !right) return;
-    
-    const original = monaco.editor.createModel(left.content || '', leftLang || left.language || 'plaintext');
-    const modified = monaco.editor.createModel(right.content || '', rightLang || right.language || 'plaintext');
-    
-    editorRef.current.setModel({ original, modified });
-    
-    const orig = editorRef.current.getOriginalEditor();
-    const mod = editorRef.current.getModifiedEditor();
-    
-    // Make both sides editable
-    orig.updateOptions({ readOnly: false });
-    mod.updateOptions({ readOnly: false });
-    
-    // Force layout again after model change
-    setTimeout(() => {
-      if (editorRef.current) editorRef.current.layout();
-      mod.focus(); // Focus modified editor to ensure paste works
-    }, 50);
-    
-    return () => {
-      original.dispose();
-      modified.dispose();
-    };
-  }, [left?.id, right?.id, leftLang, rightLang, left?.content, right?.content]);
+    if (leftModelRef.current && left) {
+      const current = leftModelRef.current.getValue();
+      if (current !== (left.content ?? '')) {
+        leftModelRef.current.setValue(left.content ?? '');
+        computeAndDecorate();
+      }
+    }
+  }, [left?.id, left?.content]);
+
+  useEffect(() => {
+    if (rightModelRef.current && right) {
+      const current = rightModelRef.current.getValue();
+      if (current !== (right.content ?? '')) {
+        rightModelRef.current.setValue(right.content ?? '');
+        computeAndDecorate();
+      }
+    }
+  }, [right?.id, right?.content]);
+
+  useEffect(() => {
+    if (leftModelRef.current && leftLang) {
+      monaco.editor.setModelLanguage(leftModelRef.current, leftLang);
+      computeAndDecorate();
+    }
+  }, [leftLang]);
+
+  useEffect(() => {
+    if (rightModelRef.current && rightLang) {
+      monaco.editor.setModelLanguage(rightModelRef.current, rightLang);
+      computeAndDecorate();
+    }
+  }, [rightLang]);
 
   return (
-    <div className="diff-view">
-      <div className="diff-toolbar">
+    <div className="diff-view neon-bg">
+      <div className="diff-toolbar neon-toolbar">
         <div className="lane">
-          <label style={{ marginRight: 6, opacity: 0.7 }}>Left</label>
-          <select value={leftLang} onChange={e => setLeftLang(e.target.value)}>
+          <label className="neon-text" style={{ marginRight: 6 }}>Left</label>
+          <select className="neon-select" value={leftLang} onChange={e => setLeftLang(e.target.value)}>
             {languages.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
         <div className="lane">
-          <label style={{ marginRight: 6, opacity: 0.7 }}>Right</label>
-          <select value={rightLang} onChange={e => setRightLang(e.target.value)}>
+          <label className="neon-text" style={{ marginRight: 6 }}>Right</label>
+          <select className="neon-select" value={rightLang} onChange={e => setRightLang(e.target.value)}>
             {languages.map(l => <option key={l} value={l}>{l}</option>)}
           </select>
         </div>
         <div className="spacer" />
-        <button className="close" title="Close Diff" onClick={onClose}>×</button>
+        <motion.button
+          className="neon-button"
+          title="Close Diff"
+          onClick={onClose}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.96 }}
+        >
+          ×
+        </motion.button>
       </div>
-      <div className="diff-editor" style={{ height: '100%', width: '100%', position: 'relative', display: 'flex' }}>
-        <div ref={ref} style={{ position: 'absolute', inset: 0, flex: '1 1 auto', minWidth: '100%', minHeight: '100%' }} />
+      <div className="diff-editor">
+        <div className="diff-grid">
+          <motion.div
+            className="editor-glass"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25 }}
+          >
+            <div ref={leftWrapRef} className="editor-host rounded-2xl" />
+          </motion.div>
+          <motion.div
+            className="editor-glass"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.25, delay: 0.05 }}
+          >
+            <div ref={rightWrapRef} className="editor-host rounded-2xl" />
+          </motion.div>
+        </div>
       </div>
     </div>
   );
