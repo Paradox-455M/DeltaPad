@@ -53,7 +53,7 @@ export function buildAppMenu(win: BrowserWindow) {
   ];
 
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ label: app.name, submenu: appSubmenu }] : []),
+    ...(isMac ? [{ label: 'DeltaPad', submenu: appSubmenu }] : []),
     {
       label: 'File',
       submenu: [

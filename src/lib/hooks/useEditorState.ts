@@ -15,10 +15,24 @@ function newId() {
   return Math.random().toString(36).slice(2, 9);
 }
 
+function computeNextUntitledTitle(existing: string[]): string {
+  const used = new Set<number>();
+  for (const t of existing) {
+    const m = /^(?:[Uu]ntitled)-(\d+)$/.exec(t.trim());
+    if (m) {
+      const n = parseInt(m[1], 10);
+      if (Number.isFinite(n) && n > 0) used.add(n);
+    }
+  }
+  let i = 1;
+  while (used.has(i)) i += 1;
+  return `Untitled-${i}`;
+}
+
 export default function useEditorState() {
   const [tabs, setTabs] = useState<Tab[]>(() => [{
     id: newId(),
-    title: 'untitled',
+    title: `Untitled-1`,
     content: '',
     language: 'plaintext',
     eol: 'lf',
@@ -32,10 +46,10 @@ export default function useEditorState() {
   const activeIdx = useMemo(() => tabs.findIndex(t => t.id === activeTabId), [tabs, activeTabId]);
 
   const createTab = useCallback(() => {
-    const t: Tab = { id: newId(), title: 'untitled', content: '', language: 'plaintext', eol: 'lf', dirty: false };
+    const t: Tab = { id: newId(), title: computeNextUntitledTitle(tabs.map(x => x.title)), content: '', language: 'plaintext', eol: 'lf', dirty: false };
     setTabs(prev => [...prev, t]);
     setActiveTabId(t.id);
-  }, []);
+  }, [tabs]);
 
   const closeTabRequest = useCallback((id: string) => {
     const t = tabs.find(x => x.id === id);
@@ -44,11 +58,18 @@ export default function useEditorState() {
       setConfirmClose({ tabId: id, title: t.title });
       closeTargetRef.current = id;
     } else {
-      setTabs(prev => prev.filter(x => x.id !== id));
-      if (activeTabId === id && tabs.length > 1) {
-        const idx = tabs.findIndex(x => x.id === id);
-        const next = tabs[idx - 1] ?? tabs[idx + 1];
-        if (next) setActiveTabId(next.id);
+      if (tabs.length === 1) {
+        // Reset last tab to a fresh untitled instead of removing
+        const nextTitle = computeNextUntitledTitle(tabs.filter(x => x.id !== id).map(x => x.title));
+        setTabs(prev => prev.map(x => x.id === id ? { ...x, title: nextTitle, filePath: undefined, content: '', language: 'plaintext', dirty: false } : x));
+        setActiveTabId(id);
+      } else {
+        setTabs(prev => prev.filter(x => x.id !== id));
+        if (activeTabId === id && tabs.length > 1) {
+          const idx = tabs.findIndex(x => x.id === id);
+          const next = tabs[idx - 1] ?? tabs[idx + 1];
+          if (next) setActiveTabId(next.id);
+        }
       }
     }
   }, [tabs, activeTabId]);
@@ -56,11 +77,17 @@ export default function useEditorState() {
   const applyClose = useCallback(() => {
     const id = closeTargetRef.current;
     if (!id) return;
-    setTabs(prev => prev.filter(x => x.id !== id));
-    if (activeTabId === id && tabs.length > 1) {
-      const idx = tabs.findIndex(x => x.id === id);
-      const next = tabs[idx - 1] ?? tabs[idx + 1];
-      if (next) setActiveTabId(next.id);
+    if (tabs.length === 1) {
+      const nextTitle = computeNextUntitledTitle(tabs.filter(x => x.id !== id).map(x => x.title));
+      setTabs(prev => prev.map(x => x.id === id ? { ...x, title: nextTitle, filePath: undefined, content: '', language: 'plaintext', dirty: false } : x));
+      setActiveTabId(id);
+    } else {
+      setTabs(prev => prev.filter(x => x.id !== id));
+      if (activeTabId === id && tabs.length > 1) {
+        const idx = tabs.findIndex(x => x.id === id);
+        const next = tabs[idx - 1] ?? tabs[idx + 1];
+        if (next) setActiveTabId(next.id);
+      }
     }
     setConfirmClose(null);
     closeTargetRef.current = null;
@@ -73,6 +100,10 @@ export default function useEditorState() {
 
   const updateActiveContent = useCallback((content: string) => {
     setTabs(prev => prev.map((t, i) => i === activeIdx ? { ...t, content, dirty: true } : t));
+  }, [activeIdx]);
+
+  const setActiveLanguage = useCallback((language: string) => {
+    setTabs(prev => prev.map((t, i) => i === activeIdx ? { ...t, language } : t));
   }, [activeIdx]);
 
   const saveActive = useCallback(async () => {
@@ -123,7 +154,7 @@ export default function useEditorState() {
   return {
     tabs, activeTabId, setActiveTabId,
     createTab, closeTabRequest, confirmClose, applyClose, cancelClose,
-    updateActiveContent, saveActive, saveActiveAs, openFileViaDialog, openFileFromPath,
+    updateActiveContent, setActiveLanguage, saveActive, saveActiveAs, openFileViaDialog, openFileFromPath,
     wrap, setWrap
   };
 }

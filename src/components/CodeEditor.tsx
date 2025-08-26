@@ -7,9 +7,10 @@ export default function CodeEditor(props: {
   tab: Tab;
   wordWrap: boolean;
   onContentChange: (content: string) => void;
+  onLanguageChange: (language: string) => void;
   onSave: () => void;
 }) {
-  const { tab, wordWrap, onContentChange, onSave } = props;
+  const { tab, wordWrap, onContentChange, onLanguageChange, onSave } = props;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [position, setPosition] = useState<{ line: number; column: number }>({ line: 1, column: 1 });
@@ -30,8 +31,31 @@ export default function CodeEditor(props: {
     });
     editorRef.current = editor;
 
-    const d1 = editor.onDidChangeModelContent(() => {
-      onContentChange(editor.getValue());
+    const d1 = editor.onDidChangeModelContent((e) => {
+      const value = editor.getValue();
+      onContentChange(value);
+      // detect language on paste or larger inserts
+      const looksLikePaste = e.changes?.some(c => c.text.length > 2 || c.text.includes('\n'));
+      if (looksLikePaste) {
+        // Let DiffView's detection logic be reused via a minimal heuristic here
+        const sample = value.slice(0, 20000).trim();
+        let lang: string = tab.language || 'plaintext';
+        try {
+          if ((sample.startsWith('{') || sample.startsWith('[')) && /":\s*|:\s*"/.test(sample)) { JSON.parse(sample); lang = 'json'; }
+        } catch {}
+        if (lang === (tab.language || 'plaintext')) {
+          // lightweight hints
+          if (/^<\?php/.test(sample)) lang = 'php';
+          else if ([/\bimport\s+React\b/,/\bexport\s+default\b/,/\binterface\s+/,/\benum\s+/,/:\s*[A-Za-z_]/].some(r => r.test(sample))) lang = 'typescript';
+        }
+        if (lang !== (tab.language || 'plaintext')) {
+          const model = editor.getModel();
+          if (model) monaco.editor.setModelLanguage(model, lang);
+          onLanguageChange(lang);
+          requestAnimationFrame(() => setTimeout(() => editor.getAction('editor.action.formatDocument')?.run(), 80));
+          document.dispatchEvent(new CustomEvent('status:meta', { detail: { eol: tab.eol, encoding: 'UTF-8' } }));
+        }
+      }
     });
     const d2 = editor.onDidChangeCursorPosition(e => {
       setPosition({ line: e.position.lineNumber, column: e.position.column });
@@ -96,7 +120,7 @@ export default function CodeEditor(props: {
   }, [tab.eol]);
 
   return (
-    <div className="editor-container">
+    <div className="editor-container" style={{ width: '100%',height:'100%',minHeight:'fit-content' }}>
       <div ref={containerRef} className="editor-host" />
     </div>
   );

@@ -8,8 +8,9 @@ import { DialogOpenParams, FileOpenParams, FileSaveAsParams, FileSaveParams, Set
 
 let win: BrowserWindow | null = null;
 
-// Ensure proper app name in macOS menu bar
+// Ensure proper app name in macOS menu bar and titlebar
 app.setName('DeltaPad');
+app.setAboutPanelOptions?.({ applicationName: 'DeltaPad' });
 
 function detectEol(text: string): 'lf' | 'crlf' {
   return text.includes('\r\n') ? 'crlf' : 'lf';

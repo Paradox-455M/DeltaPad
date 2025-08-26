@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { motion } from 'framer-motion';
 import { flattenJson } from '../lib/json/flatten';
 
 export default function JsonPathPanel(props: {
@@ -52,14 +53,14 @@ export default function JsonPathPanel(props: {
   };
 
   const panel = (
-    <div className="panel jsonpath" style={{ width }}>
+    <motion.div className="panel jsonpath" style={{ width }} initial={{ x: 12, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ duration: 0.25 }}>
       <div className="resizer-left" onMouseDown={startDrag} />
       <div className="panel-header">
-        <strong>JSON Path</strong>
-        <input placeholder="e.g. address.city or items[0].name" value={query} onChange={e => setQuery(e.target.value)} />
+        <span className="neon-text" style={{ fontWeight: 600 }}>JSON Path</span>
+        <input className="jsonpath-input" placeholder="e.g. address.city or items[0].name" value={query} onChange={e => setQuery(e.target.value)} />
         <button className="close" title="Close" aria-label="Close JSON Path" onClick={onClose}>×</button>
       </div>
-      <div className="panel-body">
+      <div className="panel-body jsonpath-body">
         {warn && <div className="warn">{warn}</div>}
         <ul>
           {items.map(({ path, value }, i) => (
@@ -71,7 +72,7 @@ export default function JsonPathPanel(props: {
           ))}
         </ul>
       </div>
-    </div>
+    </motion.div>
   );
 
   return createPortal(panel, document.body);
