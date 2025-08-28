@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
-import { flattenJson } from '../lib/json/flatten';
+import { flattenJson, type Entry } from '../lib/json/flatten';
 
 export default function JsonPathPanel(props: {
   content: string;
@@ -15,7 +15,7 @@ export default function JsonPathPanel(props: {
   const [warn, setWarn] = useState<string | null>(null);
 
   const items = useMemo(() => {
-    if (!query.trim()) return [] as Array<{ path: string; value: unknown }>;
+    if (!query.trim()) return [] as Array<Entry>;
     try {
       const { entries } = flattenJson(content, query.trim(), { max: 1000 });
       setWarn(entries.truncated ? 'Results truncated' : null);
@@ -26,12 +26,11 @@ export default function JsonPathPanel(props: {
     }
   }, [content, query]);
 
-  const handleClick = (path: string, value: unknown) => {
-    const needle = JSON.stringify(value);
-    const lines = content.split(/\r?\n/);
-    const idx = lines.findIndex(l => l.includes(needle) || l.includes(path.split('.').pop() ?? ''));
-    const lineNumber = Math.max(1, idx + 1);
-    const column = Math.max(1, (lines[idx]?.indexOf(needle?.replace(/^"|"$/g, '')) ?? 0) + 1);
+  const handleClick = (entry: Entry) => {
+    const before = content.slice(0, entry.start);
+    const lineNumber = before.split(/\r?\n/).length;
+    const lastNl = before.lastIndexOf('\n');
+    const column = entry.start - (lastNl >= 0 ? lastNl : -1);
     onJump({ lineNumber, column });
   };
 
@@ -63,11 +62,11 @@ export default function JsonPathPanel(props: {
       <div className="panel-body jsonpath-body">
         {warn && <div className="warn">{warn}</div>}
         <ul>
-          {items.map(({ path, value }, i) => (
-            <li key={i} onClick={() => handleClick(path, value)}>
-              <code>{path}</code>
+          {items.map((entry, i) => (
+            <li key={i} onClick={() => handleClick(entry)}>
+              <code>{entry.path}</code>
               <span> = </span>
-              <code className="value">{formatValue(value)}</code>
+              <code className="value">{formatValue(entry.value)}</code>
             </li>
           ))}
         </ul>
