@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as monaco from 'monaco-editor';
 import '../lib/monaco/setup';
 import { motion } from 'framer-motion';
-import hljs from 'highlight.js/lib/common';
-import { detectLanguage as detectFromPath } from '../lib/monaco/language';
+import { detectLanguage as detectFromPath, detectLanguageSmart } from '../lib/monaco/language';
 import { Tab } from './EditorTabs';
 import { diffChars } from 'diff';
 
@@ -35,94 +34,46 @@ export default function DiffView(props: {
   const [leftLang, setLeftLang] = useState<string>('plaintext');
   const [rightLang, setRightLang] = useState<string>('plaintext');
   const [warning, setWarning] = useState<string | null>(null);
+  const userLockedLeft = useRef<boolean>(false);
+  const userLockedRight = useRef<boolean>(false);
+  const runFormatSafely = (ed: monaco.editor.IStandaloneCodeEditor) => {
+    const action = ed.getAction('editor.action.formatDocument');
+    if (action && typeof (action as any).run === 'function') {
+      const supported = typeof (action as any).isSupported === 'function' ? (action as any).isSupported() : true;
+      if (supported) (action as any).run();
+    }
+  };
+
 
   const languages = useMemo(
     () => [
-      'plaintext', 'json', 'javascript', 'typescript', 'html', 'css', 'scss', 'less', 'markdown',
-      'yaml', 'xml', 'python', 'java', 'c', 'cpp', 'csharp', 'go', 'rust', 'php', 'ruby', 'shell',
-      'sql'
+      'c', 'cpp', 'csharp', 'css', 'go', 'html', 'java', 'javascript', 'json', 'less', 'markdown',
+      'php', 'plaintext', 'python', 'ruby', 'rust', 'scss', 'shell', 'sql', 'typescript', 'xml', 'yaml'
     ],
     []
   );
 
-  /** 🔍 Smart detection: prefer file extension, then strong heuristics, then hljs with confidence, else plaintext */
-  function detectLanguage(code: string, fallback: string = 'plaintext', extHint?: string, explicitLanguageHint?: string): string {
-    const sample = (code || '').slice(0, 20000);
-    const trimmed = sample.trim();
-
-    // 0) Explicit hint from tab.language if provided
-    if (explicitLanguageHint && explicitLanguageHint !== 'plaintext') {
-      return explicitLanguageHint as string;
-    }
-
-    // 1) Prefer extension mapping if available
-    if (extHint) {
-      const byExt = detectFromPath(extHint);
-      if (byExt && byExt !== 'plaintext') return byExt;
-    }
-
-    // 2) Strong JSON heuristic first
-    if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && /":\s*|:\s*"/.test(trimmed)) {
-      try { JSON.parse(trimmed); return 'json'; } catch {}
-    }
-
-    // 3) Strong PHP check
-    if (/^<\?php/.test(trimmed) || (/\$[A-Za-z_][A-Za-z0-9_]*\b/.test(sample) && /(->|::)/.test(sample))) {
-      return 'php';
-    }
-
-    // 4) Strong TypeScript heuristics
-    const tsHeuristics = [
-      /\bimport\s+React\b/,
-      /\bexport\s+default\b/,
-      /\binterface\s+[A-Za-z_][A-Za-z0-9_]*/,
-      /\benum\s+[A-Za-z_][A-Za-z0-9_]*/,
-      /\btype\s+[A-Za-z_][A-Za-z0-9_]*\s*=/,
-      /:\s*[A-Za-z_][A-Za-z0-9_]*(<[^>]+>)?/,
-    ];
-    if (tsHeuristics.some(re => re.test(sample))) {
-      return 'typescript';
-    }
-
-    // 5) highlight.js with confidence threshold
-    const result = hljs.highlightAuto(sample);
-    const map: Record<string, string> = {
-      javascript: 'javascript',
-      typescript: 'typescript',
-      html: 'html',
-      xml: 'xml',
-      css: 'css',
-      json: 'json',
-      java: 'java',
-      python: 'python',
-      cpp: 'cpp',
-      c: 'c',
-      go: 'go',
-      php: 'php',
-      ruby: 'ruby',
-      rust: 'rust',
-      shell: 'shell',
-      sql: 'sql',
-      plaintext: 'plaintext'
-    };
-
-    const candidate = result.language ? map[result.language] : undefined;
-    const confident = typeof (result as any).relevance === 'number' ? ((result as any).relevance >= 8) : !!candidate;
-    if (candidate && confident) return candidate;
-
-    return fallback || 'plaintext';
-  }
+  // Use shared smart detection helper
+  const detectLanguage = (code: string, fallback: string = 'plaintext', extHint?: string) => {
+    return detectLanguageSmart(code, { extHint, fallback });
+  };
 
   type Side = 'left' | 'right';
 
   /** 📦 Apply language to Monaco + update dropdown state + format */
-  const applyLanguageAndFormat = (side: Side, lang: string) => {
+  const applyLanguageAndFormat = (side: Side, lang: string, fromUser: boolean = false) => {
     const model = side === 'left' ? leftModelRef.current : rightModelRef.current;
     const editor = side === 'left' ? leftEditorRef.current : rightEditorRef.current;
     if (!model || !editor) return;
 
     monaco.editor.setModelLanguage(model, lang);
-    if (side === 'left') setLeftLang(lang); else setRightLang(lang);
+    if (side === 'left') {
+      setLeftLang(lang);
+      if (fromUser) userLockedLeft.current = true;
+    } else {
+      setRightLang(lang);
+      if (fromUser) userLockedRight.current = true;
+    }
 
     // Clear warning if languages now match
     const newLeft = side === 'left' ? lang : leftLang;
@@ -133,11 +84,7 @@ export default function DiffView(props: {
     }
 
     // small delay lets Monaco’s language service spin up
-    if (['json', 'typescript', 'javascript', 'html', 'css', 'markdown'].includes(lang)) {
-      requestAnimationFrame(() => {
-        setTimeout(() => editor.getAction('editor.action.formatDocument')?.run(), 80);
-      });
-    }
+    requestAnimationFrame(() => setTimeout(() => runFormatSafely(editor), 80));
   };
 
   /** 🧠 Detect + apply helper */
@@ -146,8 +93,10 @@ export default function DiffView(props: {
     if (!model) return;
     const tab = side === 'left' ? left : right;
     const extHint = tab?.filePath;
-    const tabLang = tab?.language;
-    const detected = detectLanguage(model.getValue(), 'plaintext', extHint, tabLang);
+    // skip auto-detect if user manually locked via dropdown
+    if (side === 'left' ? userLockedLeft.current : userLockedRight.current) return;
+    const fallback = side === 'left' ? leftLang : rightLang;
+    const detected = detectLanguage(model.getValue(), fallback || 'plaintext', extHint);
     applyLanguageAndFormat(side, detected);
   };
 
@@ -249,8 +198,8 @@ export default function DiffView(props: {
       monaco.editor.setTheme('synthwave-neon');
 
       // Initial detect
-      const leftDetected = detectLanguage(left?.content ?? '', 'plaintext', left?.filePath, left?.language);
-      const rightDetected = detectLanguage(right?.content ?? '', 'plaintext', right?.filePath, right?.language);
+      const leftDetected = detectLanguage(left?.content ?? '', left?.language || 'plaintext', left?.filePath);
+      const rightDetected = detectLanguage(right?.content ?? '', right?.language || 'plaintext', right?.filePath);
       setLeftLang(leftDetected);
       setRightLang(rightDetected);
 
@@ -330,9 +279,38 @@ export default function DiffView(props: {
           handlePaste('left');
         }
       });
+      // Update dropdown selections should lock user choice
+      // (JSX change below)
 
       // Monaco onDidPaste when available (some builds omit it)
       const p1 = (leftEditor as any).onDidPaste?.(() => handlePaste('left'));
+
+      // Drag & Drop for LEFT
+      const leftHost = leftWrapRef.current!;
+      const onLeftDragOver = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+      const onLeftDragEnter = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+      const onLeftDragLeave = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+      const onLeftDrop = (e: DragEvent) => {
+        e.preventDefault(); e.stopPropagation();
+        const files = e.dataTransfer?.files; if (!files || files.length === 0) return; if (files.length !== 1) { alert('Please drop a single file.'); return; }
+        const file = files[0]; const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const content = typeof reader.result === 'string' ? reader.result : '';
+            leftModel.setValue(content);
+            userLockedLeft.current = false;
+            const detected = detectLanguage(content, leftLang || 'plaintext', file.name);
+            applyLanguageAndFormat('left', detected);
+            computeAndDecorate();
+          } catch (err) { /* eslint-disable no-console */ console.error(err); /* eslint-enable no-console */ }
+        };
+        reader.onerror = () => { alert(`Failed to read file: ${reader.error?.message ?? 'Unknown error'}`); /* eslint-disable no-console */ console.error(reader.error); /* eslint-enable no-console */ };
+        reader.readAsText(file);
+      };
+      leftHost.addEventListener('dragenter', onLeftDragEnter as EventListener);
+      leftHost.addEventListener('dragover', onLeftDragOver as EventListener);
+      leftHost.addEventListener('dragleave', onLeftDragLeave as EventListener);
+      leftHost.addEventListener('drop', onLeftDrop as EventListener);
 
       // RIGHT
       const d2 = rightEditor.onDidChangeModelContent((e) => {
@@ -355,6 +333,33 @@ export default function DiffView(props: {
 
       const p2 = (rightEditor as any).onDidPaste?.(() => handlePaste('right'));
 
+      // Drag & Drop for RIGHT
+      const rightHost = rightWrapRef.current!;
+      const onRightDragOver = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'; };
+      const onRightDragEnter = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+      const onRightDragLeave = (e: DragEvent) => { e.preventDefault(); e.stopPropagation(); };
+      const onRightDrop = (e: DragEvent) => {
+        e.preventDefault(); e.stopPropagation();
+        const files = e.dataTransfer?.files; if (!files || files.length === 0) return; if (files.length !== 1) { alert('Please drop a single file.'); return; }
+        const file = files[0]; const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const content = typeof reader.result === 'string' ? reader.result : '';
+            rightModel.setValue(content);
+            userLockedRight.current = false;
+            const detected = detectLanguage(content, rightLang || 'plaintext', file.name);
+            applyLanguageAndFormat('right', detected);
+            computeAndDecorate();
+          } catch (err) { /* eslint-disable no-console */ console.error(err); /* eslint-enable no-console */ }
+        };
+        reader.onerror = () => { alert(`Failed to read file: ${reader.error?.message ?? 'Unknown error'}`); /* eslint-disable no-console */ console.error(reader.error); /* eslint-enable no-console */ };
+        reader.readAsText(file);
+      };
+      rightHost.addEventListener('dragenter', onRightDragEnter as EventListener);
+      rightHost.addEventListener('dragover', onRightDragOver as EventListener);
+      rightHost.addEventListener('dragleave', onRightDragLeave as EventListener);
+      rightHost.addEventListener('drop', onRightDrop as EventListener);
+
       computeAndDecorate();
 
       return () => {
@@ -369,6 +374,14 @@ export default function DiffView(props: {
         kd2.dispose();
         p1?.dispose?.();
         p2?.dispose?.();
+        leftHost.removeEventListener('dragenter', onLeftDragEnter as EventListener);
+        leftHost.removeEventListener('dragover', onLeftDragOver as EventListener);
+        leftHost.removeEventListener('dragleave', onLeftDragLeave as EventListener);
+        leftHost.removeEventListener('drop', onLeftDrop as EventListener);
+        rightHost.removeEventListener('dragenter', onRightDragEnter as EventListener);
+        rightHost.removeEventListener('dragover', onRightDragOver as EventListener);
+        rightHost.removeEventListener('dragleave', onRightDragLeave as EventListener);
+        rightHost.removeEventListener('drop', onRightDrop as EventListener);
         leftEditor.dispose();
         rightEditor.dispose();
         leftDecorationsCollRef.current?.clear();
@@ -421,13 +434,13 @@ export default function DiffView(props: {
       {/* Languages still selectable in toolbar */}
       <div className="lane" >
         <label className="neon-text" style={{ marginRight: 6 }}>Left</label>
-        <select className="neon-select" value={leftLang} onChange={e => applyLanguageAndFormat('left', e.target.value)}>
+        <select className="neon-select" value={leftLang} onChange={e => applyLanguageAndFormat('left', e.target.value, true)}>
           {languages.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
       </div>
       <div className="lane" style={{marginRight:'12%'}}>
         <label className="neon-text" style={{ marginRight: 6 }}>Right</label>
-        <select className="neon-select" value={rightLang} onChange={e => applyLanguageAndFormat('right', e.target.value)}>
+        <select className="neon-select" value={rightLang} onChange={e => applyLanguageAndFormat('right', e.target.value, true)}>
           {languages.map(l => <option key={l} value={l}>{l}</option>)}
         </select>
       </div>
